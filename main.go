@@ -10,6 +10,7 @@ import (
 
 func main() {
 	fmt.Println("Go WebSockets")
-	server.SetupRoutes()
+	wss := server.Init()
+	wss.SetupServer()
 	log.Fatal(http.ListenAndServe(":1337", nil))
 }
