@@ -1,0 +1,15 @@
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+
+	"github.com/uds5501/re-formers-server/server"
+)
+
+func main() {
+	fmt.Println("Go WebSockets")
+	server.SetupRoutes()
+	log.Fatal(http.ListenAndServe(":1337", nil))
+}
