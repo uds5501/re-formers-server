@@ -18,6 +18,7 @@ type WebsocketServer struct {
 	clients map[*config.ClientObject]bool
 	clientTokenMap map[string]*config.ClientObject
 	broadcast chan config.FormElement
+	clientRoomActivity chan string
 	requestUpgrader websocket.Upgrader
 	Util *utils.Utils
 }
@@ -36,6 +37,19 @@ func (wss *WebsocketServer) handleMessages() {
 				log.Printf("error: %v", err)
 				client.ClientWebSocket.Close()
 				delete(wss.clients, client)
+			}
+		}
+	}
+}
+
+func (wss *WebsocketServer) handleCustomMessages() {
+	for {
+		newMessage := <- wss.clientRoomActivity
+		for client := range wss.clients {
+			fmt.Println("SENDING MESSAGE TO ", client)
+			err := client.ClientWebSocket.WriteMessage(1, []byte(newMessage))
+			if err != nil {
+				log.Println("Error in sending ", newMessage, "to ", client )
 			}
 		}
 	}
@@ -61,8 +75,6 @@ func (wss *WebsocketServer) wsEndPoint(w http.ResponseWriter, r *http.Request) {
 		e := ws.Close()
 		fmt.Println(e)
 	}()
-	// change this crap flow
-	//wss.clients[ws] = true
 	for {
 		var newElement config.ClientRequest
 		_, p, err := ws.ReadMessage()
@@ -100,6 +112,8 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 			err := clientObj.ClientWebSocket.WriteJSON(msg)
 			if err != nil {
 				return err, clientObj
+			} else {
+				wss.clientRoomActivity <- fmt.Sprintf(`{"messageType": "Room Notif", "userName": "%s", "userColor": "%s"}`, clientObj.Username, clientObj.Colour)
 			}
 		} else {
 			// new web socket is in non pre defined token mapping
@@ -122,6 +136,8 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 					err := clientObject.ClientWebSocket.WriteJSON(msg)
 					if err != nil {
 						return err, clientObj
+					} else {
+						wss.clientRoomActivity <- fmt.Sprintf(`{"messageType": "Room Notif", "userName": "%s", "userColor": "%s"}`, clientObj.Username, clientObj.Colour)
 					}
 				}
 			} else {
@@ -142,6 +158,7 @@ func (wss *WebsocketServer) SetupServer() {
 	http.HandleFunc("/", wss.HomePage)
 	http.HandleFunc("/ws", wss.wsEndPoint)
 	go wss.handleMessages()
+	go wss.handleCustomMessages()
 }
 
 func Init() *WebsocketServer{
@@ -156,5 +173,6 @@ func Init() *WebsocketServer{
 		requestUpgrader: upgrader,
 		Util: currentUtility,
 		clientTokenMap: make(map[string]*config.ClientObject),
+		clientRoomActivity: make(chan string),
 	}
 }
