@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"strconv"
 	"time"
+	b64 "encoding/base64"
 )
 
 var (
@@ -20,7 +21,7 @@ type Utils struct {
 }
 
 func (u *Utils) AllowEntry() bool {
-	if len(u.NameMapper) < 16 {
+	if len(u.NameMapper) < 15 {
 		return true
 	} else {
 		return false
@@ -56,6 +57,7 @@ func (u *Utils) AssignData() (string, string){
 	fmt.Println("Returning: ", userName, colour)
 	return userName, colour
 }
+
 func (u *Utils) CreateMessage(message string, clientData *config.ClientObject) config.ServerClientCommunication {
 	return config.ServerClientCommunication{
 		MessageType: message,
@@ -68,8 +70,10 @@ func (u *Utils) GetEntryToken(n int) string {
 	for i := range b {
 		b[i] = letterRunes[rand.Intn(100) % 32]
 	}
+	strb := fmt.Sprintf("%s%s", string(b), strconv.Itoa(int(time.Now().UnixNano())))
+
 	//log.Println(int(time.Now().UnixNano()))
-	return string(b) + strconv.Itoa(int(time.Now().UnixNano()))
+	return b64.URLEncoding.EncodeToString([]byte(strb))
 }
 
 func Init() *Utils {

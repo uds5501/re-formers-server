@@ -54,17 +54,18 @@ func (wss *WebsocketServer) wsEndPoint(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		log.Println(err)
+		return
 	}
-	log.Println("Client successfully Connected! ")
 	defer func() {
 		log.Println("In defer close")
-		ws.Close()
+		e := ws.Close()
+		fmt.Println(e)
 	}()
 	// change this crap flow
 	//wss.clients[ws] = true
 	for {
 		var newElement config.ClientRequest
-		mType, p, err := ws.ReadMessage()
+		_, p, err := ws.ReadMessage()
 		if err != nil {
 			log.Println("Client Disconnected: ",err)
 			//delete(wss.clients, ws)
@@ -72,14 +73,11 @@ func (wss *WebsocketServer) wsEndPoint(w http.ResponseWriter, r *http.Request) {
 		}
 		err = json.Unmarshal(p, &newElement)
 		newElement.WebSocket = ws
-		log.Println("Got client message: ", newElement, mType, ws.RemoteAddr().String())
 		err2, retrievedClient := wss.HandleClientMessage(newElement)
 		if err2 != nil {
-			log.Println("Error occured: ",err)
-			ws.Close()
+			log.Println("Error occured: ",err2)
 			if retrievedClient != nil {
 				wss.chuckClient(retrievedClient)
-
 			}
 			break
 		}
@@ -92,7 +90,6 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 		// check if it's already registered
 		log.Println("Entry Token is : ", clientData.EntryToken)
 		clientObj, found := wss.clientTokenMap[clientData.EntryToken]
-		log.Println(clientObj, found)
 		if found == true {
 			// update mapped client's web socket
 			delete(wss.clients, clientObj)
@@ -106,7 +103,6 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 			}
 		} else {
 			// new web socket is in non pre defined token mapping
-			fmt.Println("In OR CONDITION")
 			if wss.Util.AllowEntry() {
 				userName, colour := wss.Util.AssignData()
 				entryToken := wss.Util.GetEntryToken(10)
@@ -118,7 +114,6 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 						IPAddress: clientData.WebSocket.RemoteAddr().String(),
 						EntryToken: entryToken,
 					}
-					log.Println("NEW OBJ MADE:", clientObject)
 					// map entryToken to client object
 					wss.clientTokenMap[entryToken] = clientObject
 					// map clientObject to a boolean true for easy broadcast
@@ -132,7 +127,9 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 			} else {
 				// return room is full message and disconnect the socket
 				log.Println("Room was full")
-				err := errors.New("room was full")
+				msg := wss.Util.CreateMessage("room-full", nil)
+				err := clientData.WebSocket.WriteJSON(msg)
+				err = errors.New("room was full")
 				return err, nil
 			}
 		}
