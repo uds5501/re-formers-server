@@ -2,13 +2,16 @@ package utils
 
 import (
 	"fmt"
+	"github.com/uds5501/re-formers-server/config"
 	"math/rand"
+	"strconv"
 	"time"
 )
 
 var (
 	names = []string{"Racoon", "Panda", "Giraffe", "Stridebreaker", "Sherlock", "Echo", "Ponzi", "Shaco", "Blitzcrank", "Mozerella", "Godzilla", "Zombie", "Karen", "Kyle", "Mitro"}
 	colours = []string{"Chocolate", "Coral", "Brown", "Black", "Blue", "Cyan", "DarkKhaki", "DeepPink", "ForestGreen", "GreenYellow", "Indigo", "OliveDrab", "Yellow", "Orange", "Red" }
+	letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 )
 type Utils struct {
 	ptrName int
@@ -17,9 +20,13 @@ type Utils struct {
 }
 
 func (u *Utils) AllowEntry() bool {
-	fmt.Println(len(u.NameMapper))
-	return false
+	if len(u.NameMapper) < 16 {
+		return true
+	} else {
+		return false
+	}
 }
+
 // returns available username + colour combo
 func (u *Utils) AssignData() (string, string){
 	s1 := rand.NewSource(time.Now().UnixNano())
@@ -46,9 +53,26 @@ func (u *Utils) AssignData() (string, string){
 			break
 		}
 	}
+	fmt.Println("Returning: ", userName, colour)
 	return userName, colour
+}
+func (u *Utils) CreateMessage(message string, clientData *config.ClientObject) config.ServerClientCommunication {
+	return config.ServerClientCommunication{
+		MessageType: message,
+		ClientObject: clientData,
+	}
+}
+
+func (u *Utils) GetEntryToken(n int) string {
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = letterRunes[rand.Intn(100) % 32]
+	}
+	//log.Println(int(time.Now().UnixNano()))
+	return string(b) + strconv.Itoa(int(time.Now().UnixNano()))
 }
 
 func Init() *Utils {
+	rand.Seed(time.Now().UnixNano())
 	return &Utils{ptrName: 0, NameMapper: map[string]bool{}, ptrColour: 0}
 }

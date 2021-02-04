@@ -13,7 +13,12 @@ type SampleElement struct {
 type ClientRequest struct {
 	MessageType string `json:"messageType"`
 	UserId string `json:"userId,omitempty"`
+	EntryToken string `json:"entryToken,omitempty"`
 	WebSocket *websocket.Conn
+}
+type ServerClientCommunication struct {
+	MessageType string `json:"messageType"`
+	ClientObject *ClientObject `json:"clientObject"`
 }
 
 type FormElement struct {
@@ -24,8 +29,8 @@ type FormElement struct {
 }
 type ClientObject struct {
 	IPAddress string `json:"ipAddress,omitempty"'`
-	Username string `json:"username,omitempty"`
-	UserId string `json:"userId,omitempty"`
+	Username string `json:"userName,omitempty"`
+	EntryToken string `json:"entryToken,omitempty"`
 	Colour string `json:"colour,omitempty"`
 	ClientWebSocket *websocket.Conn
 }
