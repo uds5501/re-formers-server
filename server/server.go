@@ -11,7 +11,6 @@ import (
 
 	"github.com/uds5501/re-formers-server/config"
 	"github.com/uds5501/re-formers-server/utils"
-
 )
 
 type WebsocketServer struct {
@@ -60,7 +59,6 @@ func (wss *WebsocketServer) chuckClient(object *config.ClientObject) {
 	delete(wss.clients, object)
 	delete(wss.clientTokenMap, object.EntryToken)
 	delete(wss.Util.NameMapper, object.Username+object.Colour)
-	log.Println(wss.Util.NameMapper)
 }
 
 func (wss *WebsocketServer) wsEndPoint(w http.ResponseWriter, r *http.Request) {
@@ -68,12 +66,10 @@ func (wss *WebsocketServer) wsEndPoint(w http.ResponseWriter, r *http.Request) {
 	ws, err := wss.requestUpgrader.Upgrade(w, r, nil)
 
 	if err != nil {
-		fmt.Println("idhar hu kya")
 		log.Println(err)
 		return
 	}
 	defer func() {
-		log.Println("In defer close", ws.RemoteAddr().String())
 		e := ws.Close()
 		fmt.Println(e)
 	}()
@@ -100,13 +96,11 @@ func (wss *WebsocketServer) wsEndPoint(w http.ResponseWriter, r *http.Request) {
 
 
 func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest) (error, *config.ClientObject){
+	log.Println("client data: ", clientData)
 	if clientData.MessageType == "room entry" {
 		// check if it's already registered
 		log.Println("Entry Token is : ", clientData.EntryToken)
 		clientObj, found := wss.clientTokenMap[clientData.EntryToken]
-		log.Println(wss.clients)
-		log.Println(wss.clientTokenMap)
-
 		if found == true {
 			// update mapped client's web socket
 			delete(wss.clients, clientObj)
@@ -122,7 +116,7 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 			}
 		} else {
 			// new web socket is in non pre defined token mapping
-			log.Println("idhar hu")
+			log.Println("we could not find you")
 			if wss.Util.AllowEntry() {
 				userName, colour := wss.Util.AssignData()
 				entryToken := wss.Util.GetEntryToken(10)
@@ -140,12 +134,10 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 					wss.clients[clientObject] = true
 					msg := wss.Util.CreateMessage("welcome", clientObject)
 					err := clientObject.ClientWebSocket.WriteJSON(msg)
-					log.Println("sent message")
 					if err != nil {
-						log.Println("ERROR aagayi yaar")
-						return err, clientObj
+						return err, clientObject
 					} else {
-						wss.clientRoomActivity <- fmt.Sprintf(`{"messageType": "Room Notif", "userName": "%s", "userColor": "%s"}`, clientObj.Username, clientObj.Colour)
+						wss.clientRoomActivity <- fmt.Sprintf(`{"messageType": "Room Notif", "userName": "%s", "userColor": "%s"}`, clientObject.Username, clientObject.Colour)
 					}
 				}
 			} else {
@@ -157,14 +149,35 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 				return err, nil
 			}
 		}
-
 	}
 	return nil, nil
+}
+
+func (wss *WebsocketServer) handleRoomExit(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	decoder := json.NewDecoder(r.Body)
+	var cr config.ClientRequest
+	err := decoder.Decode(&cr)
+	if err != nil {
+		fmt.Println(err)
+	}
+	clientObj, found := wss.clientTokenMap[cr.EntryToken]
+	if found {
+		err = clientObj.ClientWebSocket.Close()
+		if err != nil {
+			log.Fatal(err)
+		}
+		wss.chuckClient(clientObj)
+		log.Println("Logged out ", clientObj.Username)
+		//jData := json.Marshal()
+		w.Write([]byte(fmt.Sprintf("`{'message': '%s''}`", "logged-out")))
+	}
 }
 
 func (wss *WebsocketServer) SetupServer() {
 	http.HandleFunc("/", wss.HomePage)
 	http.HandleFunc("/ws", wss.wsEndPoint)
+	http.HandleFunc("/logout", wss.handleRoomExit)
 	//go wss.handleMessages()
 	go wss.handleCustomMessages()
 }

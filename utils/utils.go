@@ -54,7 +54,6 @@ func (u *Utils) AssignData() (string, string){
 			break
 		}
 	}
-	fmt.Println("Returning: ", userName, colour)
 	return userName, colour
 }
 
