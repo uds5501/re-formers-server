@@ -45,6 +45,7 @@ func (wss *WebsocketServer) handleMessages() {
 func (wss *WebsocketServer) handleCustomMessages() {
 	for {
 		newMessage := <- wss.clientRoomActivity
+		log.Println("Message to distribute: ", newMessage)
 		for client := range wss.clients {
 			fmt.Println("SENDING MESSAGE TO ", client)
 			err := client.ClientWebSocket.WriteMessage(1, []byte(newMessage))
@@ -67,11 +68,12 @@ func (wss *WebsocketServer) wsEndPoint(w http.ResponseWriter, r *http.Request) {
 	ws, err := wss.requestUpgrader.Upgrade(w, r, nil)
 
 	if err != nil {
+		fmt.Println("idhar hu kya")
 		log.Println(err)
 		return
 	}
 	defer func() {
-		log.Println("In defer close")
+		log.Println("In defer close", ws.RemoteAddr().String())
 		e := ws.Close()
 		fmt.Println(e)
 	}()
@@ -102,6 +104,9 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 		// check if it's already registered
 		log.Println("Entry Token is : ", clientData.EntryToken)
 		clientObj, found := wss.clientTokenMap[clientData.EntryToken]
+		log.Println(wss.clients)
+		log.Println(wss.clientTokenMap)
+
 		if found == true {
 			// update mapped client's web socket
 			delete(wss.clients, clientObj)
@@ -117,6 +122,7 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 			}
 		} else {
 			// new web socket is in non pre defined token mapping
+			log.Println("idhar hu")
 			if wss.Util.AllowEntry() {
 				userName, colour := wss.Util.AssignData()
 				entryToken := wss.Util.GetEntryToken(10)
@@ -134,7 +140,9 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 					wss.clients[clientObject] = true
 					msg := wss.Util.CreateMessage("welcome", clientObject)
 					err := clientObject.ClientWebSocket.WriteJSON(msg)
+					log.Println("sent message")
 					if err != nil {
+						log.Println("ERROR aagayi yaar")
 						return err, clientObj
 					} else {
 						wss.clientRoomActivity <- fmt.Sprintf(`{"messageType": "Room Notif", "userName": "%s", "userColor": "%s"}`, clientObj.Username, clientObj.Colour)
@@ -157,7 +165,7 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 func (wss *WebsocketServer) SetupServer() {
 	http.HandleFunc("/", wss.HomePage)
 	http.HandleFunc("/ws", wss.wsEndPoint)
-	go wss.handleMessages()
+	//go wss.handleMessages()
 	go wss.handleCustomMessages()
 }
 
