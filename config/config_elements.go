@@ -34,3 +34,9 @@ type ClientObject struct {
 	Colour string `json:"colour,omitempty"`
 	ClientWebSocket *websocket.Conn
 }
+
+type PeriodicUpdater struct {
+	ClientData []*ClientObject `json:"clientList,omitempty"`
+	FormData []FormElement `json:formlist,omitempty`
+	MessageType string `json:messageType,omitempty`
+}

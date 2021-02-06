@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -20,6 +21,7 @@ type WebsocketServer struct {
 	clientRoomActivity chan string
 	requestUpgrader websocket.Upgrader
 	Util *utils.Utils
+	userTicker *time.Ticker
 }
 
 
@@ -69,8 +71,13 @@ func (wss *WebsocketServer) wsEndPoint(w http.ResponseWriter, r *http.Request) {
 		log.Println(err)
 		return
 	}
+	var preListen *config.ClientObject
 	defer func() {
-		e := ws.Close()
+		var e error
+		if preListen != nil {
+			e = preListen.ClientWebSocket.Close()
+			delete(wss.clients, preListen)
+		}
 		fmt.Println(e)
 	}()
 	for {
@@ -84,6 +91,7 @@ func (wss *WebsocketServer) wsEndPoint(w http.ResponseWriter, r *http.Request) {
 		err = json.Unmarshal(p, &newElement)
 		newElement.WebSocket = ws
 		err2, retrievedClient := wss.HandleClientMessage(newElement)
+		preListen = retrievedClient
 		if err2 != nil {
 			log.Println("Error occured: ",err2)
 			if retrievedClient != nil {
@@ -112,7 +120,8 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 			if err != nil {
 				return err, clientObj
 			} else {
-				wss.clientRoomActivity <- fmt.Sprintf(`{"messageType": "Room Notif", "userName": "%s", "userColor": "%s"}`, clientObj.Username, clientObj.Colour)
+				// gonna think about this i guess
+				wss.clientRoomActivity <- fmt.Sprintf(`{"messageType": "user-joined", "userName": "%s", "userColor": "%s"}`, clientObj.Username, clientObj.Colour)
 			}
 		} else {
 			// new web socket is in non pre defined token mapping
@@ -137,7 +146,7 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 					if err != nil {
 						return err, clientObject
 					} else {
-						wss.clientRoomActivity <- fmt.Sprintf(`{"messageType": "Room Notif", "userName": "%s", "userColor": "%s"}`, clientObject.Username, clientObject.Colour)
+						wss.clientRoomActivity <- fmt.Sprintf(`{"messageType": "user-joined", "userName": "%s", "userColor": "%s"}`, clientObject.Username, clientObject.Colour)
 					}
 				}
 			} else {
@@ -174,12 +183,31 @@ func (wss *WebsocketServer) handleRoomExit(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+func (wss *WebsocketServer) roomUpdater() {
+	for {
+		select {
+		case t := <- wss.userTicker.C:
+			fmt.Println("Sending elements at", t)
+			updater := config.PeriodicUpdater{[]*config.ClientObject{}, []config.FormElement{}, "updater"}
+			for clObj := range wss.clients{
+				updater.ClientData = append(updater.ClientData, clObj)
+			}
+			for client := range wss.clients {
+				err := client.ClientWebSocket.WriteJSON(updater)
+				if err != nil {
+					log.Println("Probably the client is away", client)
+				}
+			}
+		}
+	}
+}
 func (wss *WebsocketServer) SetupServer() {
 	http.HandleFunc("/", wss.HomePage)
 	http.HandleFunc("/ws", wss.wsEndPoint)
 	http.HandleFunc("/logout", wss.handleRoomExit)
 	//go wss.handleMessages()
 	go wss.handleCustomMessages()
+	go wss.roomUpdater()
 }
 
 func Init() *WebsocketServer{
@@ -195,5 +223,6 @@ func Init() *WebsocketServer{
 		Util: currentUtility,
 		clientTokenMap: make(map[string]*config.ClientObject),
 		clientRoomActivity: make(chan string),
+		userTicker: time.NewTicker(3 * time.Second),
 	}
 }
