@@ -184,6 +184,7 @@ func (wss *WebsocketServer) handleRoomExit(w http.ResponseWriter, r *http.Reques
 		log.Println("Logged out ", clientObj.Username)
 		//jData := json.Marshal()
 		w.Write([]byte(fmt.Sprintf("`{'message': '%s''}`", "logged-out")))
+		wss.clientRoomActivity <- fmt.Sprintf(`{"MessageType": "user-logout", "userName": "%s", "userColor": "%s"}`, clientObj.Username, clientObj.Colour)
 		wss.updateActivity <- "updateUsers"
 	}
 }
@@ -208,6 +209,26 @@ func (wss *WebsocketServer) roomUpdater() {
 	}
 }
 
+func (wss *WebsocketServer) pruneClients() {
+	for {
+		select {
+			case t := <- wss.userTicker.C:
+				log.Println("Checking for prunable users at", t.Format("2006-01-02 15:04:05"))
+				for client := range wss.clients {
+					if t.Sub(client.JoinedAt) >= 30*time.Second {
+						log.Println("----Disconnecting ", client.Colour, client.Username, "-----")
+						// if the client has been logged in for 30 minutes, throw him out
+						msg := []byte(fmt.Sprintf(`{"MessageType": "disconnect"}`))
+						client.Send(1, msg)
+						client.ClientWebSocket.Close()
+						wss.chuckClient(client)
+					}
+				}
+				wss.updateActivity <- "updateUsers"
+		}
+	}
+}
+
 func (wss *WebsocketServer) SetupServer() {
 	http.HandleFunc("/", wss.HomePage)
 	http.HandleFunc("/ws", wss.wsEndPoint)
@@ -215,6 +236,7 @@ func (wss *WebsocketServer) SetupServer() {
 	//go wss.handleMessages()
 	go wss.handleCustomMessages()
 	go wss.roomUpdater()
+	go wss.pruneClients()
 }
 
 func Init() *WebsocketServer{
@@ -230,7 +252,7 @@ func Init() *WebsocketServer{
 		Util: currentUtility,
 		clientTokenMap: make(map[string]*config.ClientObject),
 		clientRoomActivity: make(chan string),
-		userTicker: time.NewTicker(3 * time.Second),
+		userTicker: time.NewTicker(10 * time.Second),
 		updateActivity: make(chan string),
 	}
 }
