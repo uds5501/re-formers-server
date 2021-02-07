@@ -22,6 +22,7 @@ type WebsocketServer struct {
 	requestUpgrader websocket.Upgrader
 	Util *utils.Utils
 	userTicker *time.Ticker
+	updateActivity chan string
 }
 
 
@@ -49,7 +50,7 @@ func (wss *WebsocketServer) handleCustomMessages() {
 		log.Println("Message to distribute: ", newMessage)
 		for client := range wss.clients {
 			fmt.Println("SENDING MESSAGE TO ", client)
-			err := client.ClientWebSocket.WriteMessage(1, []byte(newMessage))
+			err := client.Send(1, []byte(newMessage))
 			if err != nil {
 				log.Println("Error in sending ", newMessage, "to ", client )
 			}
@@ -116,12 +117,13 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 			clientObj.ClientWebSocket = clientData.WebSocket
 			wss.clients[clientObj] = true
 			msg := wss.Util.CreateMessage("welcome", clientObj)
-			err := clientObj.ClientWebSocket.WriteJSON(msg)
+			err := clientObj.SendJSON(msg)
 			if err != nil {
 				return err, clientObj
 			} else {
 				// gonna think about this i guess
-				wss.clientRoomActivity <- fmt.Sprintf(`{"messageType": "user-joined", "userName": "%s", "userColor": "%s"}`, clientObj.Username, clientObj.Colour)
+				wss.clientRoomActivity <- fmt.Sprintf(`{"MessageType": "user-joined", "userName": "%s", "userColor": "%s"}`, clientObj.Username, clientObj.Colour)
+				wss.updateActivity <- "updateUsers"
 			}
 		} else {
 			// new web socket is in non pre defined token mapping
@@ -136,17 +138,19 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 						ClientWebSocket: clientData.WebSocket,
 						IPAddress: clientData.WebSocket.RemoteAddr().String(),
 						EntryToken: entryToken,
+						JoinedAt: time.Now(),
 					}
 					// map entryToken to client object
 					wss.clientTokenMap[entryToken] = clientObject
 					// map clientObject to a boolean true for easy broadcast
 					wss.clients[clientObject] = true
 					msg := wss.Util.CreateMessage("welcome", clientObject)
-					err := clientObject.ClientWebSocket.WriteJSON(msg)
+					err := clientObject.SendJSON(msg)
 					if err != nil {
 						return err, clientObject
 					} else {
-						wss.clientRoomActivity <- fmt.Sprintf(`{"messageType": "user-joined", "userName": "%s", "userColor": "%s"}`, clientObject.Username, clientObject.Colour)
+						wss.clientRoomActivity <- fmt.Sprintf(`{"MessageType": "user-joined", "userName": "%s", "userColor": "%s"}`, clientObject.Username, clientObject.Colour)
+						wss.updateActivity <- "updateUsers"
 					}
 				}
 			} else {
@@ -180,20 +184,22 @@ func (wss *WebsocketServer) handleRoomExit(w http.ResponseWriter, r *http.Reques
 		log.Println("Logged out ", clientObj.Username)
 		//jData := json.Marshal()
 		w.Write([]byte(fmt.Sprintf("`{'message': '%s''}`", "logged-out")))
+		wss.updateActivity <- "updateUsers"
 	}
 }
 
 func (wss *WebsocketServer) roomUpdater() {
 	for {
-		select {
-		case t := <- wss.userTicker.C:
-			fmt.Println("Sending elements at", t)
+		msg := <- wss.updateActivity
+		log.Println("Processing update message", msg)
+		if msg == "updateUsers" {
+
 			updater := config.PeriodicUpdater{[]*config.ClientObject{}, []config.FormElement{}, "updater"}
-			for clObj := range wss.clients{
+			for clObj := range wss.clients {
 				updater.ClientData = append(updater.ClientData, clObj)
 			}
 			for client := range wss.clients {
-				err := client.ClientWebSocket.WriteJSON(updater)
+				err := client.SendJSON(updater)
 				if err != nil {
 					log.Println("Probably the client is away", client)
 				}
@@ -201,6 +207,7 @@ func (wss *WebsocketServer) roomUpdater() {
 		}
 	}
 }
+
 func (wss *WebsocketServer) SetupServer() {
 	http.HandleFunc("/", wss.HomePage)
 	http.HandleFunc("/ws", wss.wsEndPoint)
@@ -224,5 +231,6 @@ func Init() *WebsocketServer{
 		clientTokenMap: make(map[string]*config.ClientObject),
 		clientRoomActivity: make(chan string),
 		userTicker: time.NewTicker(3 * time.Second),
+		updateActivity: make(chan string),
 	}
 }
