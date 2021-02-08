@@ -167,7 +167,12 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 }
 
 func (wss *WebsocketServer) handleRoomExit(w http.ResponseWriter, r *http.Request) {
+	log.Println("in logout sector")
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+
 	decoder := json.NewDecoder(r.Body)
 	var cr config.ClientRequest
 	err := decoder.Decode(&cr)
@@ -192,7 +197,7 @@ func (wss *WebsocketServer) handleRoomExit(w http.ResponseWriter, r *http.Reques
 func (wss *WebsocketServer) roomUpdater() {
 	for {
 		msg := <- wss.updateActivity
-		log.Println("Processing update message", msg)
+		//log.Println("Processing update message", msg)
 		if msg == "updateUsers" {
 
 			updater := config.PeriodicUpdater{[]*config.ClientObject{}, []config.FormElement{}, "updater"}
@@ -213,9 +218,9 @@ func (wss *WebsocketServer) pruneClients() {
 	for {
 		select {
 			case t := <- wss.userTicker.C:
-				log.Println("Checking for prunable users at", t.Format("2006-01-02 15:04:05"))
+				//log.Println("Checking for prunable users at", t.Format("2006-01-02 15:04:05"))
 				for client := range wss.clients {
-					if t.Sub(client.JoinedAt) >= 30*time.Second {
+					if t.Sub(client.JoinedAt) >= 30*time.Minute {
 						log.Println("----Disconnecting ", client.Colour, client.Username, "-----")
 						// if the client has been logged in for 30 minutes, throw him out
 						msg := []byte(fmt.Sprintf(`{"MessageType": "disconnect"}`))
