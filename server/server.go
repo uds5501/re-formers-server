@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -23,6 +24,11 @@ type WebsocketServer struct {
 	Util *utils.Utils
 	userTicker *time.Ticker
 	updateActivity chan string
+
+	currFormId int
+	formArray []config.FormElement
+	formMutex sync.Mutex
+	formChannelRequest chan config.FormUpdateElement
 }
 
 
@@ -103,7 +109,6 @@ func (wss *WebsocketServer) wsEndPoint(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-
 func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest) (error, *config.ClientObject){
 	log.Println("client data: ", clientData)
 	if clientData.MessageType == "room entry" {
@@ -162,8 +167,68 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 				return err, nil
 			}
 		}
+	} else if clientData.MessageType == "add element" {
+		clientObj, _ := wss.clientTokenMap[clientData.EntryToken]
+		formUpdateRequest := config.FormUpdateElement{
+			Requester: clientObj,
+			Id: -1,
+			Action: "add",
+			Question: clientData.Question,
+			Title: clientData.Title,
+		}
+		wss.formChannelRequest <- formUpdateRequest
 	}
 	return nil, nil
+}
+
+func (wss *WebsocketServer) addForm (reqObj config.FormUpdateElement) {
+	wss.formMutex.Lock()
+	defer wss.formMutex.Unlock()
+	newObj := config.FormElement{
+		Id: wss.currFormId,
+		Question: reqObj.Question,
+		Title: reqObj.Title,
+		CreatedAt: time.Now(),
+		Versions: []config.FormVersionControl{},
+		IsDeleted: false,
+	}
+	newObj.Versions = append(newObj.Versions, config.FormVersionControl{
+		EditedAt: time.Now(),
+		ActionPerformed: "create",
+		EditedBy: reqObj.Requester,
+		Question: reqObj.Question,
+		Title: reqObj.Title,
+	})
+	wss.formArray = append(wss.formArray, newObj)
+}
+
+func (wss *WebsocketServer) editForm (reqObj config.FormUpdateElement) {
+	// we don't need to lock the entire form to edit a particular element
+	// use form element lock instead
+	formObj := &wss.formArray[reqObj.Id]
+	formObj.FormElementLock.Lock()
+	defer formObj.FormElementLock.Unlock()
+	formObj.Question = reqObj.Question
+	formObj.Title = reqObj.Title
+	formObj.Versions = append(formObj.Versions, config.FormVersionControl{
+		EditedAt: time.Now(),
+		ActionPerformed: "edit",
+		EditedBy: reqObj.Requester,
+		Question: reqObj.Question,
+		Title: reqObj.Title,
+	})
+}
+func (wss *WebsocketServer) formRequestHandler() {
+	for {
+		req := <- wss.formChannelRequest
+		if req.Action == "add" {
+			wss.addForm(req)
+			wss.updateActivity <- "updateForm"
+		} else if req.Action == "edit" {
+			wss.editForm(req)
+			wss.updateActivity <- "updateForm"
+		}
+	}
 }
 
 func (wss *WebsocketServer) handleRoomExit(w http.ResponseWriter, r *http.Request) {
@@ -194,12 +259,37 @@ func (wss *WebsocketServer) handleRoomExit(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+func (wss *WebsocketServer) handleLockAssignment (w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+	decoder := json.NewDecoder(r.Body)
+	var cr config.ClientRequest
+	err := decoder.Decode(&cr)
+	if err != nil {
+		fmt.Println(err)
+		w.WriteHeader(500)
+		w.Write([]byte(fmt.Sprintf("`{'message': '%s'}`", "someError")))
+	}
+	clientObj, found := wss.clientTokenMap[cr.EntryToken]
+	if found {
+		hookAssigned := wss.Util.AssignLock(clientObj, cr.FormId)
+		if hookAssigned {
+			log.Println("Hook assigned to ", clientObj)
+			w.Write([]byte(fmt.Sprintf("`{'message': '%s'}`", "assigned")))
+		} else {
+			log.Println("Hook declined to ", clientObj)
+			w.Write([]byte(fmt.Sprintf("`{'message': '%s'}`", "declined")))
+		}
+	}
+}
+
 func (wss *WebsocketServer) roomUpdater() {
 	for {
 		msg := <- wss.updateActivity
 		//log.Println("Processing update message", msg)
 		if msg == "updateUsers" {
-
 			updater := config.PeriodicUpdater{[]*config.ClientObject{}, []config.FormElement{}, "updater"}
 			for clObj := range wss.clients {
 				updater.ClientData = append(updater.ClientData, clObj)
@@ -207,7 +297,15 @@ func (wss *WebsocketServer) roomUpdater() {
 			for client := range wss.clients {
 				err := client.SendJSON(updater)
 				if err != nil {
-					log.Println("Probably the client is away", client)
+					log.Println("Couldn't send update user list to ", client)
+				}
+			}
+		} else if msg == "updateForm" {
+			updater := config.PeriodicUpdater{[]*config.ClientObject{}, wss.formArray, "formUpdater"}
+			for client := range wss.clients {
+				err := client.SendJSON(updater)
+				if err != nil {
+					log.Println("Couldn't send updated forms to ", client)
 				}
 			}
 		}
@@ -238,10 +336,15 @@ func (wss *WebsocketServer) SetupServer() {
 	http.HandleFunc("/", wss.HomePage)
 	http.HandleFunc("/ws", wss.wsEndPoint)
 	http.HandleFunc("/logout", wss.handleRoomExit)
+	http.HandleFunc("/lock", wss.handleLockAssignment)
 	//go wss.handleMessages()
 	go wss.handleCustomMessages()
 	go wss.roomUpdater()
 	go wss.pruneClients()
+	for i:=3; i>0; i-- {
+		// spawn 3 threads to handle form requests
+		go wss.formRequestHandler()
+	}
 }
 
 func Init() *WebsocketServer{
@@ -259,5 +362,9 @@ func Init() *WebsocketServer{
 		clientRoomActivity: make(chan string),
 		userTicker: time.NewTicker(10 * time.Second),
 		updateActivity: make(chan string),
+
+		currFormId: 0,
+		formArray: []config.FormElement{},
+		formChannelRequest: make(chan config.FormUpdateElement),
 	}
 }

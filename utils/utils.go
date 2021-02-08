@@ -18,6 +18,11 @@ type Utils struct {
 	ptrName int
 	ptrColour int
 	NameMapper map[string]bool
+
+	// 1 client can edit only 1 element
+	clientFormMap map[*config.ClientObject]int
+	// 1 element can be edited by many clients
+	formClientMap map[int][]*config.ClientObject
 }
 
 func (u *Utils) AllowEntry() bool {
@@ -29,7 +34,7 @@ func (u *Utils) AllowEntry() bool {
 }
 
 // returns available username + colour combo
-func (u *Utils) AssignData() (string, string){
+func (u *Utils) AssignData() (string, string) {
 	s1 := rand.NewSource(time.Now().UnixNano())
 	r1 := rand.New(s1)
 	a := r1.Intn(25)
@@ -75,7 +80,24 @@ func (u *Utils) GetEntryToken(n int) string {
 	return b64.URLEncoding.EncodeToString([]byte(strb))
 }
 
+func (u *Utils) AssignLock(clientObj *config.ClientObject, formId int) bool {
+	_, found := u.clientFormMap[clientObj]
+	if found {
+		return false
+	} else {
+		u.clientFormMap[clientObj] = formId
+		u.formClientMap[formId] = append(u.formClientMap[formId], clientObj)
+		return true
+	}
+}
+
 func Init() *Utils {
 	rand.Seed(time.Now().UnixNano())
-	return &Utils{ptrName: 0, NameMapper: map[string]bool{}, ptrColour: 0}
+	return &Utils{
+		ptrName: 0,
+		NameMapper: map[string]bool{},
+		ptrColour: 0,
+		clientFormMap: map[*config.ClientObject]int{},
+		formClientMap: map[int][]*config.ClientObject{},
+	}
 }

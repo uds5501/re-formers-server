@@ -13,8 +13,10 @@ type SampleElement struct {
 
 type ClientRequest struct {
 	MessageType string `json:"messageType"`
-	UserId string `json:"userId,omitempty"`
 	EntryToken string `json:"entryToken,omitempty"`
+	Question string `json:"question",omitempty`
+	Title string `json:"title",omitempty`
+	FormId int `json:"formId",omitempty`
 	WebSocket *websocket.Conn
 }
 type ServerClientCommunication struct {
@@ -22,11 +24,30 @@ type ServerClientCommunication struct {
 	ClientObject *ClientObject `json:"clientObject"`
 }
 
-type FormElement struct {
-	Id string `json:"id"`
-	CreatedAt time.Time
-	EditedBy ClientObject
+type FormVersionControl struct {
+	EditedAt time.Time `json:"editedAt"`
+	ActionPerformed string `json:"actionPerformed"`
+	EditedBy *ClientObject
 	Question string `json:"question"`
+	Title string `json:"title"`
+}
+
+type FormElement struct {
+	Id int `json:"id"`
+	Question string `json:"question"`
+	Title string `json:"title"`
+	CreatedAt time.Time
+	Versions []FormVersionControl
+	IsDeleted bool
+	FormElementLock sync.Mutex
+}
+
+type FormUpdateElement struct {
+	Id int
+	Action string
+	Question string
+	Title string
+	Requester *ClientObject
 }
 type ClientObject struct {
 	JoinedAt time.Time `json:joinedAt,omitempty`
