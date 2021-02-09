@@ -1,12 +1,13 @@
 package utils
 
 import (
+	b64 "encoding/base64"
 	"fmt"
 	"github.com/uds5501/re-formers-server/config"
 	"math/rand"
 	"strconv"
+	"sync"
 	"time"
-	b64 "encoding/base64"
 )
 
 var (
@@ -23,6 +24,7 @@ type Utils struct {
 	clientFormMap map[*config.ClientObject]int
 	// 1 element can be edited by many clients
 	formClientMap map[int][]*config.ClientObject
+	utilityMutex sync.Mutex
 }
 
 func (u *Utils) AllowEntry() bool {
@@ -35,6 +37,8 @@ func (u *Utils) AllowEntry() bool {
 
 // returns available username + colour combo
 func (u *Utils) AssignData() (string, string) {
+	u.utilityMutex.Lock()
+	defer u.utilityMutex.Unlock()
 	s1 := rand.NewSource(time.Now().UnixNano())
 	r1 := rand.New(s1)
 	a := r1.Intn(25)
@@ -91,6 +95,18 @@ func (u *Utils) AssignLock(clientObj *config.ClientObject, formId int) bool {
 	}
 }
 
+func (u *Utils) UnlockForm(clientObj *config.ClientObject, formId int) {
+	u.utilityMutex.Lock()
+	defer u.utilityMutex.Unlock()
+	delete(u.clientFormMap, clientObj)
+	requiredSlice := u.formClientMap[formId]
+	for i, p := range requiredSlice {
+		if p == clientObj {
+			requiredSlice = append(requiredSlice[:i], requiredSlice[i+1:]...)
+		}
+	}
+	u.formClientMap[formId] = requiredSlice
+}
 func Init() *Utils {
 	rand.Seed(time.Now().UnixNano())
 	return &Utils{

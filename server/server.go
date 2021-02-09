@@ -91,13 +91,14 @@ func (wss *WebsocketServer) wsEndPoint(w http.ResponseWriter, r *http.Request) {
 		var newElement config.ClientRequest
 		_, p, err := ws.ReadMessage()
 		if err != nil {
-			log.Println("Client Disconnected: ",err)
+			log.Println("Client Disconnected: ",err, preListen.EntryToken)
 			//delete(wss.clients, ws)
 			break
 		}
 		err = json.Unmarshal(p, &newElement)
 		newElement.WebSocket = ws
 		err2, retrievedClient := wss.HandleClientMessage(newElement)
+		log.Println("Receieved Client: ", retrievedClient)
 		preListen = retrievedClient
 		if err2 != nil {
 			log.Println("Error occured: ",err2)
@@ -123,12 +124,16 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 			wss.clients[clientObj] = true
 			msg := wss.Util.CreateMessage("welcome", clientObj)
 			err := clientObj.SendJSON(msg)
+			//updater := config.PeriodicUpdater{ClientData: []*config.ClientObject{}, FormData: wss.formArray, MessageType: "history"}
+			//err = clientObj.SendJSON(updater)
 			if err != nil {
 				return err, clientObj
 			} else {
 				// gonna think about this i guess
 				wss.clientRoomActivity <- fmt.Sprintf(`{"MessageType": "user-joined", "userName": "%s", "userColor": "%s"}`, clientObj.Username, clientObj.Colour)
 				wss.updateActivity <- "updateUsers"
+				wss.updateActivity <- "updateForm"
+				return nil, clientObj
 			}
 		} else {
 			// new web socket is in non pre defined token mapping
@@ -151,11 +156,15 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 					wss.clients[clientObject] = true
 					msg := wss.Util.CreateMessage("welcome", clientObject)
 					err := clientObject.SendJSON(msg)
+					//updater := config.PeriodicUpdater{ClientData: []*config.ClientObject{}, FormData: wss.formArray, MessageType: "history"}
+					//err = clientObj.SendJSON(updater)
 					if err != nil {
 						return err, clientObject
 					} else {
 						wss.clientRoomActivity <- fmt.Sprintf(`{"MessageType": "user-joined", "userName": "%s", "userColor": "%s"}`, clientObject.Username, clientObject.Colour)
 						wss.updateActivity <- "updateUsers"
+						wss.updateActivity <- "updateForm"
+						return nil, clientObject
 					}
 				}
 			} else {
@@ -177,6 +186,18 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 			Title: clientData.Title,
 		}
 		wss.formChannelRequest <- formUpdateRequest
+		return nil, clientObj
+	} else if clientData.MessageType == "edit" {
+		clientObj, _ := wss.clientTokenMap[clientData.EntryToken]
+		formUpdateRequest := config.FormUpdateElement{
+			Requester: clientObj,
+			Id: clientData.FormId,
+			Action: "edit",
+			Question: clientData.Question,
+			Title: clientData.Title,
+		}
+		wss.formChannelRequest <- formUpdateRequest
+		return nil, clientObj
 	}
 	return nil, nil
 }
@@ -207,7 +228,10 @@ func (wss *WebsocketServer) editForm (reqObj config.FormUpdateElement) {
 	// use form element lock instead
 	formObj := &wss.formArray[reqObj.Id]
 	formObj.FormElementLock.Lock()
-	defer formObj.FormElementLock.Unlock()
+	defer func() {
+		wss.Util.UnlockForm(reqObj.Requester, reqObj.Id)
+		formObj.FormElementLock.Unlock()
+	}()
 	formObj.Question = reqObj.Question
 	formObj.Title = reqObj.Title
 	formObj.Versions = append(formObj.Versions, config.FormVersionControl{
@@ -217,7 +241,9 @@ func (wss *WebsocketServer) editForm (reqObj config.FormUpdateElement) {
 		Question: reqObj.Question,
 		Title: reqObj.Title,
 	})
+
 }
+
 func (wss *WebsocketServer) formRequestHandler() {
 	for {
 		req := <- wss.formChannelRequest
@@ -290,7 +316,7 @@ func (wss *WebsocketServer) roomUpdater() {
 		msg := <- wss.updateActivity
 		//log.Println("Processing update message", msg)
 		if msg == "updateUsers" {
-			updater := config.PeriodicUpdater{[]*config.ClientObject{}, []config.FormElement{}, "updater"}
+			updater := config.PeriodicUpdater{ClientData: []*config.ClientObject{}, FormData: []config.FormElement{}, MessageType: "updater"}
 			for clObj := range wss.clients {
 				updater.ClientData = append(updater.ClientData, clObj)
 			}
@@ -301,7 +327,7 @@ func (wss *WebsocketServer) roomUpdater() {
 				}
 			}
 		} else if msg == "updateForm" {
-			updater := config.PeriodicUpdater{[]*config.ClientObject{}, wss.formArray, "formUpdater"}
+			updater := config.PeriodicUpdater{ClientData: []*config.ClientObject{}, FormData: wss.formArray, MessageType: "formUpdater"}
 			for client := range wss.clients {
 				err := client.SendJSON(updater)
 				if err != nil {
@@ -328,6 +354,7 @@ func (wss *WebsocketServer) pruneClients() {
 					}
 				}
 				wss.updateActivity <- "updateUsers"
+				wss.updateActivity <- "updateForm"
 		}
 	}
 }
