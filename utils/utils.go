@@ -4,6 +4,7 @@ import (
 	b64 "encoding/base64"
 	"fmt"
 	"github.com/uds5501/re-formers-server/config"
+	"log"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -28,7 +29,7 @@ type Utils struct {
 }
 
 func (u *Utils) AllowEntry() bool {
-	if len(u.NameMapper) < 15 {
+	if len(u.NameMapper) < 30 {
 		return true
 	} else {
 		return false
@@ -84,20 +85,34 @@ func (u *Utils) GetEntryToken(n int) string {
 	return b64.URLEncoding.EncodeToString([]byte(strb))
 }
 
-func (u *Utils) AssignLock(clientToken string, formId int) bool {
-	_, found := u.clientFormMap[clientToken]
+func (u *Utils) AssignLock(clientToken string, formId int, ele config.FormElement) bool {
+	log.Println("LOCKING BEFORE FCM:", u.formClientMap )
+	log.Println("LOCKING BEFORE CFM:", u.clientFormMap )
+	log.Println("LOCKING BEFORE DATA:", ele )
+	if ele.IsDeleted {
+		return false
+	}
+	cfId, found := u.clientFormMap[clientToken]
 	if found {
+		if cfId == formId {
+			return true
+		}
 		return false
 	} else {
 		u.clientFormMap[clientToken] = formId
 		u.formClientMap[formId] = append(u.formClientMap[formId], clientToken)
+		log.Println("LOCKING AFTER FCM:", u.formClientMap )
+		log.Println("LOCKING AFTER CFM:", u.clientFormMap )
 		return true
 	}
+
 }
 
 func (u *Utils) UnlockForm(clientToken string) {
 	u.utilityMutex.Lock()
 	defer u.utilityMutex.Unlock()
+	log.Println("UNLOCKING BEFORE FCM:", u.formClientMap )
+	log.Println("UNLOCKING BEFORE CFM:", u.clientFormMap )
 	formId := u.clientFormMap[clientToken]
 	delete(u.clientFormMap, clientToken)
 	requiredSlice := u.formClientMap[formId]
@@ -107,6 +122,15 @@ func (u *Utils) UnlockForm(clientToken string) {
 		}
 	}
 	u.formClientMap[formId] = requiredSlice
+	log.Println("UNLOCKING BEFORE FCM:", u.formClientMap )
+	log.Println("UNLOCKING BEFORE CFM:", u.clientFormMap )
+}
+func (u *Utils) IsLocked(id int) bool {
+	if len(u.formClientMap[id]) > 0 {
+		return true
+	} else {
+		return false
+	}
 }
 func Init() *Utils {
 	rand.Seed(time.Now().UnixNano())

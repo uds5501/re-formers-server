@@ -99,7 +99,7 @@ func (wss *WebsocketServer) wsEndPoint(w http.ResponseWriter, r *http.Request) {
 		err = json.Unmarshal(p, &newElement)
 		newElement.WebSocket = ws
 		err2, retrievedClient := wss.HandleClientMessage(newElement)
-		log.Println("Receieved Client: ", retrievedClient.Colour, retrievedClient.Username)
+		log.Println("Receieved Client: ", retrievedClient.Colour, retrievedClient.Username, newElement.MessageType)
 		preListen = retrievedClient
 		if err2 != nil {
 			if retrievedClient != nil {
@@ -189,12 +189,24 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 		return nil, clientObj
 	} else if clientData.MessageType == "edit" {
 		clientObj, _ := wss.clientTokenMap[clientData.EntryToken]
+		log.Println("CLIENT DATA:", clientData)
 		formUpdateRequest := config.FormUpdateElement{
 			Requester: clientObj,
 			Id: clientData.FormId,
 			Action: "edit",
 			Question: clientData.Question,
 			Title: clientData.Title,
+		}
+		wss.formChannelRequest <- formUpdateRequest
+		return nil, clientObj
+	} else if clientData.MessageType == "delete element" {
+		log.Println("In delete element handler", clientData)
+
+		clientObj, _ := wss.clientTokenMap[clientData.EntryToken]
+		formUpdateRequest := config.FormUpdateElement{
+			Requester: clientObj,
+			Id: clientData.FormId,
+			Action: "delete",
 		}
 		wss.formChannelRequest <- formUpdateRequest
 		return nil, clientObj
@@ -221,6 +233,7 @@ func (wss *WebsocketServer) addForm (reqObj config.FormUpdateElement) {
 		Title: reqObj.Title,
 	})
 	wss.formArray = append(wss.formArray, newObj)
+	wss.currFormId++
 }
 
 func (wss *WebsocketServer) editForm (reqObj config.FormUpdateElement) {
@@ -244,6 +257,27 @@ func (wss *WebsocketServer) editForm (reqObj config.FormUpdateElement) {
 
 }
 
+func (wss *WebsocketServer) deleteForm (reqObj config.FormUpdateElement) {
+	formObj := &wss.formArray[reqObj.Id]
+	clientObj := reqObj.Requester
+	if formObj.IsDeleted {
+		// make sure you return a notification that it's already deleted
+		clientObj.Send(1, []byte(fmt.Sprintf(`{"MessageType": "already-deleted"}`)))
+		return
+	} else if wss.Util.IsLocked(reqObj.Id) {
+		// give the fact that the current object cannot be deleted because it's being edited
+		clientObj.Send(1, []byte(fmt.Sprintf(`{"MessageType": "current-locked"}`)))
+		return
+	}
+	formObj.FormElementLock.Lock()
+	defer func() {
+		formObj.FormElementLock.Unlock()
+	}()
+	formObj.IsDeleted = true
+	clientObj.Send(1, []byte(fmt.Sprintf(`{"MessageType": "delete-confirmed"}`)))
+	wss.updateActivity <- "updateForm"
+}
+
 func (wss *WebsocketServer) formRequestHandler() {
 	for {
 		req := <- wss.formChannelRequest
@@ -253,6 +287,8 @@ func (wss *WebsocketServer) formRequestHandler() {
 		} else if req.Action == "edit" {
 			wss.editForm(req)
 			wss.updateActivity <- "updateForm"
+		} else if req.Action == "delete" {
+			wss.deleteForm(req)
 		}
 	}
 }
@@ -299,7 +335,7 @@ func (wss *WebsocketServer) handleLockAssignment (w http.ResponseWriter, r *http
 	}
 	clientObj, found := wss.clientTokenMap[cr.EntryToken]
 	if found {
-		hookAssigned := wss.Util.AssignLock(clientObj.EntryToken, cr.FormId)
+		hookAssigned := wss.Util.AssignLock(clientObj.EntryToken, cr.FormId, wss.formArray[cr.FormId])
 		if hookAssigned {
 			log.Println("Hook assigned to ", clientObj.Colour, clientObj.Username)
 			w.Write([]byte(fmt.Sprintf(`{"message": "%s"}`, "assigned")))
