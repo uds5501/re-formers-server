@@ -53,9 +53,9 @@ func (wss *WebsocketServer) handleMessages() {
 func (wss *WebsocketServer) handleCustomMessages() {
 	for {
 		newMessage := <- wss.clientRoomActivity
-		log.Println("Message to distribute: ", newMessage)
+		//log.Println("Message to distribute: ", newMessage)
 		for client := range wss.clients {
-			fmt.Println("SENDING MESSAGE TO ", client)
+			//fmt.Println("SENDING MESSAGE TO ", client)
 			err := client.Send(1, []byte(newMessage))
 			if err != nil {
 				log.Println("Error in sending ", newMessage, "to ", client )
@@ -84,6 +84,7 @@ func (wss *WebsocketServer) wsEndPoint(w http.ResponseWriter, r *http.Request) {
 		if preListen != nil {
 			e = preListen.ClientWebSocket.Close()
 			delete(wss.clients, preListen)
+			wss.Util.UnlockForm(preListen.EntryToken)
 		}
 		fmt.Println(e)
 	}()
@@ -98,10 +99,9 @@ func (wss *WebsocketServer) wsEndPoint(w http.ResponseWriter, r *http.Request) {
 		err = json.Unmarshal(p, &newElement)
 		newElement.WebSocket = ws
 		err2, retrievedClient := wss.HandleClientMessage(newElement)
-		log.Println("Receieved Client: ", retrievedClient)
+		log.Println("Receieved Client: ", retrievedClient.Colour, retrievedClient.Username)
 		preListen = retrievedClient
 		if err2 != nil {
-			log.Println("Error occured: ",err2)
 			if retrievedClient != nil {
 				wss.chuckClient(retrievedClient)
 			}
@@ -111,7 +111,7 @@ func (wss *WebsocketServer) wsEndPoint(w http.ResponseWriter, r *http.Request) {
 }
 
 func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest) (error, *config.ClientObject){
-	log.Println("client data: ", clientData)
+	//log.Println("client data: ", clientData)
 	if clientData.MessageType == "room entry" {
 		// check if it's already registered
 		log.Println("Entry Token is : ", clientData.EntryToken)
@@ -137,7 +137,7 @@ func (wss *WebsocketServer) HandleClientMessage(clientData config.ClientRequest)
 			}
 		} else {
 			// new web socket is in non pre defined token mapping
-			log.Println("we could not find you")
+			//log.Println("we could not find you")
 			if wss.Util.AllowEntry() {
 				userName, colour := wss.Util.AssignData()
 				entryToken := wss.Util.GetEntryToken(10)
@@ -229,7 +229,7 @@ func (wss *WebsocketServer) editForm (reqObj config.FormUpdateElement) {
 	formObj := &wss.formArray[reqObj.Id]
 	formObj.FormElementLock.Lock()
 	defer func() {
-		wss.Util.UnlockForm(reqObj.Requester, reqObj.Id)
+		wss.Util.UnlockForm(reqObj.Requester.EntryToken)
 		formObj.FormElementLock.Unlock()
 	}()
 	formObj.Question = reqObj.Question
@@ -279,13 +279,14 @@ func (wss *WebsocketServer) handleRoomExit(w http.ResponseWriter, r *http.Reques
 		wss.chuckClient(clientObj)
 		log.Println("Logged out ", clientObj.Username)
 		//jData := json.Marshal()
-		w.Write([]byte(fmt.Sprintf("`{'message': '%s''}`", "logged-out")))
+		w.Write([]byte(fmt.Sprintf(`{"message": "%s"}`, "logged-out")))
 		wss.clientRoomActivity <- fmt.Sprintf(`{"MessageType": "user-logout", "userName": "%s", "userColor": "%s"}`, clientObj.Username, clientObj.Colour)
 		wss.updateActivity <- "updateUsers"
 	}
 }
 
 func (wss *WebsocketServer) handleLockAssignment (w http.ResponseWriter, r *http.Request) {
+	log.Println("In Lock assignment")
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
@@ -294,19 +295,17 @@ func (wss *WebsocketServer) handleLockAssignment (w http.ResponseWriter, r *http
 	var cr config.ClientRequest
 	err := decoder.Decode(&cr)
 	if err != nil {
-		fmt.Println(err)
-		w.WriteHeader(500)
-		w.Write([]byte(fmt.Sprintf("`{'message': '%s'}`", "someError")))
+		w.Write([]byte(fmt.Sprintf(`{"message": "%s"}`, "someError")))
 	}
 	clientObj, found := wss.clientTokenMap[cr.EntryToken]
 	if found {
-		hookAssigned := wss.Util.AssignLock(clientObj, cr.FormId)
+		hookAssigned := wss.Util.AssignLock(clientObj.EntryToken, cr.FormId)
 		if hookAssigned {
-			log.Println("Hook assigned to ", clientObj)
-			w.Write([]byte(fmt.Sprintf("`{'message': '%s'}`", "assigned")))
+			log.Println("Hook assigned to ", clientObj.Colour, clientObj.Username)
+			w.Write([]byte(fmt.Sprintf(`{"message": "%s"}`, "assigned")))
 		} else {
-			log.Println("Hook declined to ", clientObj)
-			w.Write([]byte(fmt.Sprintf("`{'message': '%s'}`", "declined")))
+			log.Println("Hook declined to ", clientObj.Colour, clientObj.Username)
+			w.Write([]byte(fmt.Sprintf(`{"message": "%s"}`, "declined")))
 		}
 	}
 }
@@ -350,6 +349,7 @@ func (wss *WebsocketServer) pruneClients() {
 						msg := []byte(fmt.Sprintf(`{"MessageType": "disconnect"}`))
 						client.Send(1, msg)
 						client.ClientWebSocket.Close()
+						wss.Util.UnlockForm(client.EntryToken)
 						wss.chuckClient(client)
 					}
 				}
@@ -359,11 +359,28 @@ func (wss *WebsocketServer) pruneClients() {
 	}
 }
 
+func (wss *WebsocketServer) handleUnlockAssignment (w http.ResponseWriter, r *http.Request) {
+	log.Println("In Client Unlock")
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+	decoder := json.NewDecoder(r.Body)
+	var cr config.ClientRequest
+	err := decoder.Decode(&cr)
+	if err != nil {
+		w.Write([]byte(fmt.Sprintf(`{"message": "%s"}`, "someError")))
+	}
+	wss.Util.UnlockForm(cr.EntryToken)
+}
+
 func (wss *WebsocketServer) SetupServer() {
 	http.HandleFunc("/", wss.HomePage)
 	http.HandleFunc("/ws", wss.wsEndPoint)
 	http.HandleFunc("/logout", wss.handleRoomExit)
 	http.HandleFunc("/lock", wss.handleLockAssignment)
+	http.HandleFunc("/unlock", wss.handleUnlockAssignment)
+
 	//go wss.handleMessages()
 	go wss.handleCustomMessages()
 	go wss.roomUpdater()

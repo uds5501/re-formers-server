@@ -21,9 +21,9 @@ type Utils struct {
 	NameMapper map[string]bool
 
 	// 1 client can edit only 1 element
-	clientFormMap map[*config.ClientObject]int
+	clientFormMap map[string]int
 	// 1 element can be edited by many clients
-	formClientMap map[int][]*config.ClientObject
+	formClientMap map[int][]string
 	utilityMutex sync.Mutex
 }
 
@@ -84,24 +84,25 @@ func (u *Utils) GetEntryToken(n int) string {
 	return b64.URLEncoding.EncodeToString([]byte(strb))
 }
 
-func (u *Utils) AssignLock(clientObj *config.ClientObject, formId int) bool {
-	_, found := u.clientFormMap[clientObj]
+func (u *Utils) AssignLock(clientToken string, formId int) bool {
+	_, found := u.clientFormMap[clientToken]
 	if found {
 		return false
 	} else {
-		u.clientFormMap[clientObj] = formId
-		u.formClientMap[formId] = append(u.formClientMap[formId], clientObj)
+		u.clientFormMap[clientToken] = formId
+		u.formClientMap[formId] = append(u.formClientMap[formId], clientToken)
 		return true
 	}
 }
 
-func (u *Utils) UnlockForm(clientObj *config.ClientObject, formId int) {
+func (u *Utils) UnlockForm(clientToken string) {
 	u.utilityMutex.Lock()
 	defer u.utilityMutex.Unlock()
-	delete(u.clientFormMap, clientObj)
+	formId := u.clientFormMap[clientToken]
+	delete(u.clientFormMap, clientToken)
 	requiredSlice := u.formClientMap[formId]
 	for i, p := range requiredSlice {
-		if p == clientObj {
+		if p == clientToken {
 			requiredSlice = append(requiredSlice[:i], requiredSlice[i+1:]...)
 		}
 	}
@@ -113,7 +114,7 @@ func Init() *Utils {
 		ptrName: 0,
 		NameMapper: map[string]bool{},
 		ptrColour: 0,
-		clientFormMap: map[*config.ClientObject]int{},
-		formClientMap: map[int][]*config.ClientObject{},
+		clientFormMap: map[string]int{},
+		formClientMap: map[int][]string{},
 	}
 }
