@@ -23,6 +23,7 @@ type WebsocketServer struct {
 	requestUpgrader websocket.Upgrader
 	Util *utils.Utils
 	userTicker *time.Ticker
+	resetTicker *time.Ticker
 	updateActivity chan string
 
 	currFormId int
@@ -281,6 +282,7 @@ func (wss *WebsocketServer) deleteForm (reqObj config.FormUpdateElement) {
 func (wss *WebsocketServer) formRequestHandler() {
 	for {
 		req := <- wss.formChannelRequest
+		log.Println("Form request recieved: ", req)
 		if req.Action == "add" {
 			wss.addForm(req)
 			wss.updateActivity <- "updateForm"
@@ -410,6 +412,37 @@ func (wss *WebsocketServer) handleUnlockAssignment (w http.ResponseWriter, r *ht
 	wss.Util.UnlockForm(cr.EntryToken)
 }
 
+func (wss *WebsocketServer) initiateReset() {
+	for {
+		select {
+		case t := <- wss.resetTicker.C:
+			//log.Println("Checking for prunable users at", t.Format("2006-01-02 15:04:05"))
+			for client := range wss.clients {
+				if t.Sub(client.JoinedAt) >= 30*time.Minute {
+					log.Println("----Disconnecting ", client.Colour, client.Username, "-----")
+					// if the client has been logged in for 30 minutes, throw him out
+					msg := []byte(fmt.Sprintf(`{"MessageType": "disconnect"}`))
+					client.Send(1, msg)
+					client.ClientWebSocket.Close()
+					wss.Util.UnlockForm(client.EntryToken)
+					wss.chuckClient(client)
+
+				}
+				wss.formArray = []config.FormElement{}
+				wss.clients = make(map[*config.ClientObject]bool)
+				wss.clientTokenMap = make(map[string]*config.ClientObject)
+				wss.currFormId = 0
+				wss.clientRoomActivity = make(chan string)
+				wss.updateActivity = make(chan string)
+				wss.formChannelRequest = make(chan config.FormUpdateElement)
+				wss.Util.Reset()
+			}
+			wss.updateActivity <- "updateUsers"
+			wss.updateActivity <- "updateForm"
+		}
+	}
+}
+
 func (wss *WebsocketServer) SetupServer() {
 	http.HandleFunc("/", wss.HomePage)
 	http.HandleFunc("/ws", wss.wsEndPoint)
@@ -441,6 +474,7 @@ func Init() *WebsocketServer{
 		clientTokenMap: make(map[string]*config.ClientObject),
 		clientRoomActivity: make(chan string),
 		userTicker: time.NewTicker(10 * time.Second),
+		resetTicker: time.NewTicker(6 * time.Hour),
 		updateActivity: make(chan string),
 
 		currFormId: 0,
