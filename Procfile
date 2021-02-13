@@ -1,1 +1,1 @@
-web: re-formers-server
+web: bin/re-formers-server
