@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	names = []string{"Racoon", "Panda", "Giraffe", "Stridebreaker", "Sherlock", "Echo", "Ponzi", "Shaco", "Blitzcrank", "Mozerella", "Godzilla", "Zombie", "Karen", "Kyle", "Mitro"}
-	colours = []string{"Chocolate", "Coral", "Brown", "Black", "Blue", "Cyan", "DarkKhaki", "DeepPink", "ForestGreen", "GreenYellow", "Indigo", "OliveDrab", "Yellow", "Orange", "Red" }
+	names = []string{"Racoon", "Panda", "Giraffe", "Stridebreaker", "Sherlock", "Echo", "Ponzi", "Shaco", "Blitzcrank", "Mozerella", "Godzilla", "Zombie", "Karen", "Kyle", "Mitro", "Aplha", "Bravo", "Greenday", "SteamRoller", "Trickster", "Crackhead", "Sniper"}
+	colours = []string{"Chocolate", "Coral", "Brown", "Cyan", "DarkKhaki", "DeepPink", "ForestGreen", "GreenYellow", "OliveDrab", "Yellow", "Orange", "Red" }
 	letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 )
 type Utils struct {
